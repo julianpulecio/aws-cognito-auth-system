@@ -1,0 +1,112 @@
+service: aws-cognito-auth-system
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: python3.9
+  httpApi:
+    authorizers:
+      someJwtAuthorizer:
+        type: jwt
+        identitySource: $request.header.Authorization
+        issuerUrl:
+          Fn::Sub: "https://cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPool}"
+        audience:
+          - !Ref UserPoolClient
+
+functions:
+  preToken:
+    handler: handler.pre_token_auth_lambda
+    events:
+      - cognitoUserPool:
+          pool: MyUserPool
+          trigger: PreTokenGeneration
+          existing: True
+
+  admin:
+    handler: handler.lambda_for_admin_users
+    events:
+      - httpApi:
+          method: GET
+          path: /hello
+          authorizer:
+            name: someJwtAuthorizer
+            scopes:
+              - !Ref AdminCognitoGroup
+  
+  regular:
+    handler: handler.lambda_for_regular_users
+    events:
+      - httpApi:
+          method: GET
+          path: /protected
+          authorizer:
+            name: someJwtAuthorizer
+            scopes:
+              - !Ref RegularCognitoGroup
+
+resources:
+  Resources:
+    CognitoUserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: MyUserPool
+        UsernameAttributes:
+          - email
+        AutoVerifiedAttributes:
+          - email
+        Policies:
+          PasswordPolicy:
+            MinimumLength: 8
+            RequireLowercase: true
+            RequireNumbers: true
+            RequireSymbols: true
+            RequireUppercase: true
+            TemporaryPasswordValidityDays: 0
+        Schema:
+          - Name: email
+            Required: true
+            Mutable: false
+        EmailVerificationMessage: Hello, {####} World!
+        EmailVerificationSubject: Verify your email address
+
+    UserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        ClientName: MyUserPoolClient
+        GenerateSecret: false
+        UserPoolId: !Ref CognitoUserPool
+        AllowedOAuthFlows:
+          - code
+        AllowedOAuthFlowsUserPoolClient: true
+        AllowedOAuthScopes:
+          - email
+          - openid
+          - profile
+        CallbackURLs:
+          - https://jpexample.com/callback
+        LogoutURLs:
+          - https://jpexample.com/logout
+        SupportedIdentityProviders:
+          - COGNITO
+        EnableTokenRevocation: true
+        ExplicitAuthFlows:
+          - ALLOW_USER_SRP_AUTH
+          - ALLOW_REFRESH_TOKEN_AUTH
+        ReadAttributes:
+          - email
+        WriteAttributes:
+          - email
+
+    AdminCognitoGroup:
+      Type: AWS::Cognito::UserPoolGroup
+      Properties:
+        GroupName: MyAdminGroup
+        UserPoolId: !Ref CognitoUserPool
+    
+    RegularCognitoGroup:
+      Type: AWS::Cognito::UserPoolGroup
+      Properties:
+        GroupName: MyRegularGroup
+        UserPoolId: !Ref CognitoUserPool
